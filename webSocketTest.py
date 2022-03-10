@@ -1,27 +1,94 @@
-import websocket
-import rel
+from tracemalloc import start
+from websocket import create_connection
+from json import dumps,loads
+import time
+import os,sys
+from concurrent.futures import ThreadPoolExecutor
 
-rel.safe_read()
+from eth_abi import encode_single, encode_abi
 
-def on_message(ws, message):
-    print(message)
+executor = ThreadPoolExecutor(max_workers=4)
+# url     = 'wss://polygon-mainnet.g.alchemy.com/v2/tGb32Cyl35DXFXXlOuJqbAAf6MbXPn0o'
+url = 'wss://speedy-nodes-nyc.moralis.io/02799b1f72329a0eefa3b741/polygon/mainnet/ws'
 
-def on_error(ws, error):
-    print(error)
 
-def on_close(ws, close_status_code, close_msg):
-    print("### closed ###")
+def getReserveInput(pairAddress,ws):
+    allData = {"jsonrpc":"2.0","method":"eth_call","params":[{"to": pairAddress, "data":"0x0902f1ac"}, "latest"],"id":1}
+    json_data = dumps(allData).encode("utf-8")
+    ws.send(json_data)
+    start = time.time() * 1000
+    response = ws.recv()
+    print(f"printing {(time.time() * 1000 - start)}")
+    data = loads(response)
+    if data["result"] != "0x":
+        reserve = decodeReserve(data["result"])
+        return (reserve)
+    else:
+        print("error reserve")
+        return None
+    
 
-def on_open(ws):
-    print("Opened connection")
+def getAmountInput(amountIn,fromAddress,toAddress):
+    input1 = encode_single('(uint256,uint256,uint256,address,address)',(int(amountIn),64,2,fromAddress,toAddress))
+    data =  '0xd06ca61f'+ input1.hex()
+    return (data)
 
-if __name__ == "__main__":
-    ws = websocket.WebSocketApp('wss://polygon-mainnet.g.alchemy.com/v2/tGb32Cyl35DXFXXlOuJqbAAf6MbXPn0o',
-                              on_open=on_open,
-                              on_message=on_message,
-                              on_error=on_error,
-                              on_close=on_close)
+def decodeReserve(input):
+    rererve0 = int(input[2:66],16)
+    rererve1 = int(input[66:130],16)
+    return(rererve0,rererve1)
 
-    ws.run_forever(dispatcher=rel)  # Set dispatcher to automatic reconnection
-    rel.signal(2, rel.abort)  # Keyboard Interrupt
-    rel.dispatch()
+def decodeGetAmountWith2PathOnly(input):
+    amountOut = int(input[194:258],16)
+    return(amountOut)
+
+def getAmountInput(amountIn,fromAddress,toAddress,routerAddress,id):
+    input = encode_single('(uint256,uint256,uint256,address,address)',(int(amountIn),64,2,fromAddress,toAddress))
+    data =  '0xd06ca61f'+ input.hex()
+    allData = {"jsonrpc":"2.0","method":"eth_call","params":[{"to": routerAddress, "data":data}, "latest"],"id":id}
+    return (allData)
+
+try:
+    
+    ws = create_connection(url)
+    print("connected")
+
+
+    print ("test for GetAmount")
+    time1 = time.time() * 1000
+    # ws = create_connection(url)
+    # print("connected")
+    filtre = getAmountInput(100000000000000000,"0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270","0xc2132D05D31c914a87C6611C10748AEb04B58e8F","0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff",1)
+    # filtre = {'jsonrpc': '2.0', 'method': 'eth_call', 'params': [{'to': '0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff', 'data': '0xd06ca61f000000000000000000000000000000000000000000000000016345785d8a0000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000d500b1d8e8ef31e21c99d1db9a6444d3adf1270000000000000000000000000c2132d05d31c914a87c6611c10748aeb04b58e8f'}, 'latest'], 'id': 1}
+    json_data = dumps(filtre).encode("utf-8")
+    ws.send(json_data)
+    response = ws.recv()
+    # print (response)
+    data = loads(response)
+    reserve = decodeGetAmountWith2PathOnly(data["result"])
+    print ("amountOut :",reserve)
+
+    print((time.time() * 1000) - time1)
+    # print (response)
+
+
+
+    print ("test for  reserve")
+    time1 = time.time() * 1000
+    # ws = create_connection(url)
+    # print("connected")
+    reserve = getReserveInput("0x6E53cB6942e518376E9e763554dB1A45DDCd25c4",ws)
+    print ("reserve0 :",reserve[0])
+    print ("reserve1 :",reserve[1])
+    print((time.time() * 1000) - time1)
+    # print (response)
+
+
+
+
+except Exception as err:
+
+    exc_type, exc_obj, exc_tb = sys.exc_info()
+    fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+    print(str([exc_type,fname,exc_tb.tb_lineno,err]))
+    
